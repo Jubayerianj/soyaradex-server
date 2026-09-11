@@ -8,8 +8,9 @@
 // AgentExecutor; this server sees it and sends the settlement. It never
 // authorises anything: without that verdict, AgentExecutor refuses the trade.
 
+import path from 'node:path';
 import { formatEther } from 'viem';
-import { loadConfig } from './config.js';
+import { loadConfig, storeOnVolume } from './config.js';
 import { makeClients, executorReads, AGENT_EXECUTOR_ABI } from './chain.js';
 import { createStore, TERMINAL_STAGES } from './store.js';
 import { createKeeper } from './keeper.js';
@@ -31,6 +32,7 @@ const checks = {
   validatorMatches: null,
   paused: null,
   storeError: null,
+  storeOnVolume: storeOnVolume(cfg.storePath),
   checkedAt: null,
   error: null,
 };
@@ -68,6 +70,7 @@ function warnings() {
   if (checks.paused) w.push('AgentExecutor is paused');
   if (!cfg.apiKey) w.push('SERVER_API_KEY is not set: the app cannot hand trades over');
   if (checks.error) w.push(`could not read AgentExecutor to check the setup: ${checks.error}`);
+  if (checks.storeOnVolume === false) w.push(`STORE_PATH ${cfg.storePath} is not on a Railway volume, so a redeploy wipes the trades it holds: attach a volume at ${path.dirname(path.resolve(cfg.storePath))}`);
   if (checks.storeError) w.push(`STORE_PATH ${cfg.storePath} is not writable (${checks.storeError}): mount a volume there; on Railway, if it still fails, set RAILWAY_RUN_UID=0`);
   return w;
 }

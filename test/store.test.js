@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { tempStore, entry, hash } from './helpers.js';
 import { createStore } from '../src/store.js';
+import { storeOnVolume } from '../src/config.js';
 
 test('a handed-over trade is held, waiting, and found by its round', () => {
   const { store } = tempStore();
@@ -61,4 +62,12 @@ test('an unreadable record is set aside, never overwritten', () => {
   const aside = fs.readdirSync(file.replace(/settlements\.json$/, '')).find((f) => f.includes('unreadable'));
   assert.ok(aside, 'the unreadable file is kept');
   assert.equal(store.get(hash('e')).stage, 'waiting');
+});
+
+test('on Railway, a store off the volume is caught', () => {
+  assert.equal(storeOnVolume('/data/settlements.json', {}), null, 'not on Railway: nothing to say');
+  assert.equal(storeOnVolume('/data/settlements.json', { RAILWAY_ENVIRONMENT_NAME: 'production' }), false, 'no volume attached');
+  assert.equal(storeOnVolume('/data/settlements.json', { RAILWAY_ENVIRONMENT_NAME: 'production', RAILWAY_VOLUME_MOUNT_PATH: '/data' }), true);
+  assert.equal(storeOnVolume('./data/settlements.json', { RAILWAY_ENVIRONMENT_NAME: 'production', RAILWAY_VOLUME_MOUNT_PATH: '/data' }), false, 'a relative path is not on /data');
+  assert.equal(storeOnVolume('/database/s.json', { RAILWAY_ENVIRONMENT_NAME: 'production', RAILWAY_VOLUME_MOUNT_PATH: '/data' }), false, 'a prefix is not a mount');
 });

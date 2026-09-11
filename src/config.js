@@ -3,6 +3,7 @@
 // Everything comes from the environment. The defaults are the live GenLayer
 // Bradbury deployment; override them only when it moves.
 
+import path from 'node:path';
 import { isAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -19,6 +20,20 @@ function address(env, name, fallback) {
   const v = read(env, name, fallback);
   if (!isAddress(v)) throw new Error(`${name} is not an address: ${v}`);
   return v;
+}
+
+/**
+ * On Railway, is the store on a volume? Railway sets RAILWAY_VOLUME_MOUNT_PATH
+ * only when one is attached; anywhere else on its disk is wiped by a redeploy.
+ * Null when not running on Railway.
+ */
+export function storeOnVolume(storePath, env = process.env) {
+  const onRailway = Boolean(env.RAILWAY_ENVIRONMENT_NAME || env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID);
+  if (!onRailway) return null;
+  const mount = String(env.RAILWAY_VOLUME_MOUNT_PATH || '').replace(/\/+$/, '');
+  if (!mount) return false;
+  const p = path.resolve(storePath);
+  return p === mount || p.startsWith(`${mount}/`);
 }
 
 export function loadConfig(env = process.env) {
