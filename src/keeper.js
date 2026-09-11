@@ -25,12 +25,14 @@ export async function keeperPass({
   canSettle = () => true,
   now = Date.now(),
 }) {
-  const summary = { checked: 0, settled: 0, expired: 0, waiting: 0, blocked: 0, failed: 0, finalized: 0 };
+  const summary = { checked: 0, settled: 0, expired: 0, waiting: 0, blocked: 0, failed: 0, finalized: 0, unreadable: 0 };
   if (drain) {
     try {
       const d = await drain();
       summary.finalized = d?.finalized?.length || 0;
-    } catch { /* the next pass drains again */ }
+    } catch (err) {
+      summary.drainError = err?.shortMessage || err?.message || String(err); // the next pass drains again
+    }
   }
 
   for (const e of list()) {
@@ -62,8 +64,12 @@ export async function keeperPass({
         summary.waiting += 1;
         continue;
       }
-    } catch {
-      summary.waiting += 1; // an unreadable chain is not a verdict; next pass
+    } catch (err) {
+      // An unreadable chain is not a verdict: wait for the next pass. Counted,
+      // so a run of them shows in the log instead of looking like patience.
+      summary.waiting += 1;
+      summary.unreadable += 1;
+      summary.readError = summary.readError || err?.shortMessage || err?.message || String(err);
       continue;
     }
 
@@ -105,11 +111,42 @@ export async function keeperPass({
   return summary;
 }
 
+/** While the chain stays unreadable, say so at most this often. */
+const OUTAGE_LOG_EVERY_MS = 5 * 60 * 1000;
+/** A line proving the keeper is alive, this often. */
+const HEARTBEAT_MS = 10 * 60 * 1000;
+
 /** The interval around keeperPass, with one pass at a time and its last result. */
-export function createKeeper({ store, reads, settle, drain, canSettle, intervalMs, log = console }) {
+export function createKeeper({ store, reads, settle, drain, canSettle, intervalMs, log = console, now = () => Date.now() }) {
   let running = null;
   let timer = null;
   let last = { at: null, summary: null, error: null };
+  let outageSince = null;
+  let outageLoggedAt = 0;
+  let heartbeatAt = now();
+
+  function report(summary) {
+    const t = now();
+    const trouble = summary.readError || summary.drainError;
+    if (trouble) {
+      if (!outageSince) outageSince = t;
+      if (t - outageLoggedAt >= OUTAGE_LOG_EVERY_MS) {
+        outageLoggedAt = t;
+        log.warn(`[keeper] chain unreadable for ${Math.round((t - outageSince) / 1000)}s, trades wait: ${trouble}`);
+      }
+    } else if (outageSince) {
+      log.log(`[keeper] chain readable again after ${Math.round((t - outageSince) / 1000)}s`);
+      outageSince = null;
+      outageLoggedAt = 0;
+    }
+    if (summary.settled || summary.expired || summary.failed || summary.finalized) {
+      log.log(`[keeper] ${JSON.stringify(summary)}`);
+    }
+    if (t - heartbeatAt >= HEARTBEAT_MS) {
+      heartbeatAt = t;
+      log.log(`[keeper] alive: ${summary.checked} open, ${summary.waiting} waiting for a verdict`);
+    }
+  }
 
   const runOnce = () => {
     if (running) return Promise.resolve({ skipped: true });
@@ -121,9 +158,7 @@ export function createKeeper({ store, reads, settle, drain, canSettle, intervalM
           settle, drain, canSettle,
         });
         last = { at: new Date().toISOString(), summary, error: null };
-        if (summary.settled || summary.expired || summary.failed || summary.finalized) {
-          log.log(`[keeper] ${JSON.stringify(summary)}`);
-        }
+        report(summary);
         return summary;
       } catch (err) {
         last = { at: new Date().toISOString(), summary: null, error: err?.message || String(err) };
@@ -149,6 +184,6 @@ export function createKeeper({ store, reads, settle, drain, canSettle, intervalM
       timer = null;
       if (running) await Promise.race([running, new Promise((r) => setTimeout(r, 25_000))]);
     },
-    status: () => ({ ...last, running: Boolean(running), intervalMs }),
+    status: () => ({ ...last, running: Boolean(running), intervalMs, unreadableSince: outageSince ? new Date(outageSince).toISOString() : null }),
   };
 }

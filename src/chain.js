@@ -25,7 +25,9 @@ export function bradbury(rpcUrl) {
 
 export function makeClients(cfg) {
   const chain = bradbury(cfg.rpcUrl);
-  const transport = http(cfg.rpcUrl, { timeout: 30_000 });
+  // Fail fast and let the next pass retry: a dead connection must not hold a
+  // pass for minutes (viem's defaults wait 10s and retry 3 times with backoff).
+  const transport = http(cfg.rpcUrl, { timeout: 15_000, retryCount: 1 });
   return {
     publicClient: createPublicClient({ chain, transport }),
     walletClient: cfg.relayer ? createWalletClient({ account: cfg.relayer, chain, transport }) : null,

@@ -118,12 +118,65 @@ test('a sent settlement whose receipt timed out is credited to the server once s
   assert.deepEqual([e.stage, e.settledBy, e.execTxHash], ['settled', 'server', hash('e')]);
 });
 
-test('an unreadable chain is not a verdict', async () => {
+test('an unreadable chain is not a verdict, and is counted, not hidden', async () => {
   const w = world();
   w.store.register(entry('a'));
   const s = await keeperPass({ ...w.deps({ readUsed: async () => { throw new Error('rpc down'); } }), now: t0 });
   assert.equal(s.waiting, 1);
+  assert.equal(s.unreadable, 1);
+  assert.equal(s.readError, 'rpc down');
   assert.equal(w.store.get(hash('a')).stage, 'waiting');
+});
+
+test('an outage is logged when it starts, every few minutes while it lasts, and when it ends', async () => {
+  const w = world();
+  w.store.register(entry('o'));
+  let clock = t0;
+  let down = true;
+  const lines = [];
+  const keeper = createKeeper({
+    store: w.store,
+    reads: {
+      readUsed: async () => { if (down) throw new Error('HTTP request failed'); return false; },
+      readLive: async () => false,
+      readExpiry: async () => 0,
+    },
+    settle: async () => ({ success: true }),
+    drain: null,
+    canSettle: () => true,
+    intervalMs: 30_000,
+    log: { log: (m) => lines.push(m), warn: (m) => lines.push(m) },
+    now: () => clock,
+  });
+  await keeper.runOnce();
+  clock += 30_000; await keeper.runOnce();
+  clock += 5 * 60_000; await keeper.runOnce();
+  assert.deepEqual(lines.filter((l) => /unreadable/.test(l)).length, 2, 'first failure, then once per five minutes');
+  assert.match(lines[0], /HTTP request failed/);
+  assert.ok(keeper.status().unreadableSince);
+  down = false;
+  clock += 30_000; await keeper.runOnce();
+  assert.match(lines.at(-1), /readable again after 360s/);
+  assert.equal(keeper.status().unreadableSince, null);
+});
+
+test('a heartbeat shows the keeper is alive', async () => {
+  const w = world();
+  let clock = t0;
+  const lines = [];
+  const keeper = createKeeper({
+    store: w.store,
+    reads: { readUsed: async () => false, readLive: async () => false, readExpiry: async () => 0 },
+    settle: async () => ({ success: true }),
+    drain: null,
+    canSettle: () => true,
+    intervalMs: 30_000,
+    log: { log: (m) => lines.push(m), warn: (m) => lines.push(m) },
+    now: () => clock,
+  });
+  await keeper.runOnce();
+  clock += 11 * 60_000; await keeper.runOnce();
+  assert.ok(lines.some((l) => /alive/.test(l)));
 });
 
 test('passes never overlap', async () => {

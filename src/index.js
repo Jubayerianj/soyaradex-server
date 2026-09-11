@@ -16,6 +16,7 @@ import { createKeeper } from './keeper.js';
 import { settleTrade } from './settle.js';
 import { drainQueue } from './finalize.js';
 import { createApi } from './api.js';
+import { log } from './log.js';
 
 const cfg = loadConfig();
 const { publicClient, walletClient } = makeClients(cfg);
@@ -66,6 +67,7 @@ function warnings() {
   if (checks.validatorMatches === false) w.push('AgentExecutor trusts a different AgentValidator than VALIDATOR_ADDRESS');
   if (checks.paused) w.push('AgentExecutor is paused');
   if (!cfg.apiKey) w.push('SERVER_API_KEY is not set: the app cannot hand trades over');
+  if (checks.error) w.push(`could not read AgentExecutor to check the setup: ${checks.error}`);
   if (checks.storeError) w.push(`STORE_PATH ${cfg.storePath} is not writable (${checks.storeError}): mount a volume there; on Railway, if it still fails, set RAILWAY_RUN_UID=0`);
   return w;
 }
@@ -80,6 +82,7 @@ const keeper = createKeeper({
   drain: walletClient ? () => drainQueue({ publicClient, walletClient, recipient: cfg.validator }) : null,
   canSettle,
   intervalMs: cfg.keeperIntervalMs,
+  log,
 });
 
 const server = createApi({
@@ -113,17 +116,17 @@ const server = createApi({
 });
 
 await selfCheck();
-for (const w of warnings()) console.warn(`[server] ${w}`);
+for (const w of warnings()) log.warn(`[server] ${w}`);
 setInterval(selfCheck, 10 * 60 * 1000).unref();
 
 server.listen(cfg.port, () => {
-  console.log(`[server] listening on ${cfg.port} · relayer ${checks.relayer || 'none'} · executor ${cfg.executor} · store ${cfg.storePath} · every ${cfg.keeperIntervalMs / 1000}s`);
+  log.log(`[server] listening on ${cfg.port} · relayer ${checks.relayer || 'none'} · executor ${cfg.executor} · store ${cfg.storePath} · every ${cfg.keeperIntervalMs / 1000}s`);
   keeper.start();
 });
 
 // Railway sends SIGTERM on every redeploy. Let a settlement in flight finish.
 async function shutdown(signal) {
-  console.log(`[server] ${signal}: finishing the current pass`);
+  log.log(`[server] ${signal}: finishing the current pass`);
   await keeper.stop();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5000).unref();
