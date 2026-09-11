@@ -78,6 +78,7 @@ test('a malformed order is refused before any chain read', async (t) => {
   assert.equal((await s.call('/v1/settlements', { method: 'POST', body: { ...trade, commitment: '0x12' } })).status, 400);
   assert.match(orderProblem(order({ amountIn: '1.5' }), PROGRAM), /amountIn/);
   assert.match(orderProblem(order({ user: 'nope' }), PROGRAM), /user/);
+  assert.match(orderProblem(order({ tokenIn: '0x0000000000000000000000000000000000000000' }), PROGRAM), /native GEN/);
 });
 
 test('the user letting a trade go cancels it', async (t) => {

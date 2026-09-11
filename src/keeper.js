@@ -91,6 +91,10 @@ export async function keeperPass({
         error: null,
       }, now);
       summary.settled += 1;
+    } else if (r?.refused) {
+      // A trade this server must never send. Closed, not retried.
+      update(e.commitment, { stage: 'cancelled', error: r.error || null }, now);
+      summary.blocked += 1;
     } else if (r?.needsApproval) {
       // Needs the user: one token approval. Nothing the server can do.
       update(e.commitment, { stage: 'needs-approval', lastAttemptAt: now, error: r.error || null }, now);

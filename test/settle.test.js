@@ -7,6 +7,7 @@ const EXECUTOR = '0x1BCBad3da718690fa60289DcBF15835e5C79021f';
 
 function clients({ used = false, live = true, expiry = 0, allowance = 10n ** 30n, balance = 10n ** 30n, simulate, write, receipt = 'success' } = {}) {
   const calls = [];
+  const values = [];
   const publicClient = {
     readContract: async ({ functionName }) => ({
       commitmentUsed: used, isVerdictLive: live, verdictExpiry: expiry, allowance, balanceOf: balance,
@@ -17,9 +18,9 @@ function clients({ used = false, live = true, expiry = 0, allowance = 10n ** 30n
   };
   const walletClient = {
     account: { address: '0x23D542DCEFb00b1f4268E67a0EC1EF4de0A58fe2' },
-    writeContract: async (req) => { if (write) await write(req); calls.push(['write', req.functionName, req.gas]); return hash('5'); },
+    writeContract: async (req) => { if (write) await write(req); calls.push(['write', req.functionName, req.gas]); values.push(req.value); return hash('5'); },
   };
-  return { publicClient, walletClient, calls };
+  return { publicClient, walletClient, calls, values };
 }
 
 test('a live verdict settles through executeSwap, with gas headroom', async () => {
@@ -64,6 +65,20 @@ test('a short balance is a plain failure, not an approval prompt', async () => {
 test('a reverted receipt is a failure', async () => {
   const c = clients({ receipt: 'reverted' });
   assert.equal((await settleTrade(entry('1'), { ...c, executor: EXECUTOR })).success, false);
+});
+
+test('native GEN in is refused before anything is sent: the relayer never pays for a trade', async () => {
+  const c = clients();
+  const r = await settleTrade(entry('1', { order: { ...entry('1').order, tokenIn: '0x0000000000000000000000000000000000000000' } }), { ...c, executor: EXECUTOR });
+  assert.equal(r.refused, true);
+  assert.deepEqual(c.calls, []);
+});
+
+test('a settlement never carries value', async () => {
+  const c = clients();
+  await settleTrade(entry('1'), { ...c, executor: EXECUTOR });
+  assert.equal(c.calls[1][1], 'executeSwap');
+  assert.deepEqual(c.values, [undefined], 'no value on the settling transaction');
 });
 
 test('without a relayer key nothing is attempted', async () => {

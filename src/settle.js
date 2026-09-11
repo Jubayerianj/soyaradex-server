@@ -62,25 +62,28 @@ export async function settleTrade(entry, { publicClient, walletClient, executor,
   if (expiry > 0 && expiry * 1000 < now) return { success: false, verdictExpired: true, error: 'The approval expired before settlement' };
   if (!(await read('isVerdictLive', [entry.commitment]))) return { success: false, error: 'No live verdict for this order yet' };
 
-  // The token's own transferFrom would fail with an opaque SafeMath message.
-  // Say plainly what is missing instead.
-  const native = order.tokenIn.toLowerCase() === zeroAddress;
-  if (!native) {
-    const [allowance, balance] = await Promise.all([
-      read('allowance', [order.user, executor], order.tokenIn, ERC20_ABI),
-      read('balanceOf', [order.user], order.tokenIn, ERC20_ABI),
-    ]);
-    if (balance < order.amountIn) return { success: false, error: `Insufficient balance: the wallet holds ${balance}, the trade needs ${order.amountIn}` };
-    if (allowance < order.amountIn) return { success: false, needsApproval: true, error: `Token approval missing for AgentExecutor ${executor}` };
+  // Never pay for a trade. With native GEN in, AgentExecutor would take the
+  // input from this server's own transaction rather than the user's wallet.
+  if (order.tokenIn.toLowerCase() === zeroAddress) {
+    return { success: false, refused: true, error: 'native GEN input: the relayer never pays for a trade' };
   }
 
+  // The token's own transferFrom would fail with an opaque SafeMath message.
+  // Say plainly what is missing instead.
+  const [allowance, balance] = await Promise.all([
+    read('allowance', [order.user, executor], order.tokenIn, ERC20_ABI),
+    read('balanceOf', [order.user], order.tokenIn, ERC20_ABI),
+  ]);
+  if (balance < order.amountIn) return { success: false, error: `Insufficient balance: the wallet holds ${balance}, the trade needs ${order.amountIn}` };
+  if (allowance < order.amountIn) return { success: false, needsApproval: true, error: `Token approval missing for AgentExecutor ${executor}` };
+
+  // No value, ever: the input comes from the user's wallet.
   const call = {
     account: walletClient.account,
     address: executor,
     abi: AGENT_EXECUTOR_ABI,
     functionName: 'executeSwap',
     args: [order, entry.program],
-    value: native ? order.amountIn : 0n,
   };
   let hash;
   try {

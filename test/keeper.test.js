@@ -89,6 +89,17 @@ test('a failure backs off instead of retrying every pass', async () => {
   assert.equal(w.store.get(hash('6')).attempts, 1);
 });
 
+test('a trade the server must never send is closed, not retried', async () => {
+  const w = world();
+  w.store.register(entry('r'));
+  w.chain.live.add(hash('r'));
+  const refusing = w.deps({ settle: async (e) => { w.sent.push(e.commitment); return { success: false, refused: true, error: 'native GEN input' }; } });
+  await keeperPass({ ...refusing, now: t0 });
+  await keeperPass({ ...refusing, now: t0 + 10 * 60_000 });
+  assert.equal(w.store.get(hash('r')).stage, 'cancelled');
+  assert.equal(w.sent.length, 1);
+});
+
 test('a cancelled trade is never settled', async () => {
   const w = world();
   w.store.register(entry('7'));
