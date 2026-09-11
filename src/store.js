@@ -56,6 +56,19 @@ export function createStore(file) {
   }
 
   const store = {
+    /** Can the record be written? The error when it cannot, else null. */
+    probe() {
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const p = `${file}.probe`;
+        fs.writeFileSync(p, 'ok');
+        fs.unlinkSync(p);
+        return null;
+      } catch (err) {
+        return err?.message || String(err);
+      }
+    },
+
     list: () => readAll(),
     get: (commitment) => readAll().find((e) => same(e.commitment, commitment)) || null,
     findByRound: (txHash) => readAll().find((e) => same(e.validationTxHash, txHash)) || null,

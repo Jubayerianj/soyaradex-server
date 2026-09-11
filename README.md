@@ -30,7 +30,9 @@ settle from the user's open Soyara tab, as before.
 3. **Add a Volume** to the service with mount path `/data`, so a redeploy keeps
    the trades it holds.
 4. **Settings → Networking → Generate Domain.** Open `https://<domain>/health`
-   and check `"canSettle": true` and `"warnings": []`.
+   and check `"canSettle": true`, `"canHold": true` and `"warnings": []`. If the
+   volume is not writable, the warning says so; setting `RAILWAY_RUN_UID=0`
+   fixes that on Railway.
 5. Keep **one replica**: two would race each other for the same trades.
 6. In the **Soyara app's** environment set `SETTLEMENT_SERVER_URL=https://<domain>`
    and `SETTLEMENT_SERVER_KEY=<the same SERVER_API_KEY>`, then redeploy the app.

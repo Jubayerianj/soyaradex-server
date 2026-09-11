@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { tempStore, entry, hash } from './helpers.js';
+import { createStore } from '../src/store.js';
 
 test('a handed-over trade is held, waiting, and found by its round', () => {
   const { store } = tempStore();
@@ -42,6 +43,15 @@ test('finished trades go after a day; open ones stay', () => {
   store.register(entry('3'), t0 + 25 * 60 * 60 * 1000);
   assert.equal(store.get(hash('1')), null);
   assert.equal(store.get(hash('2')).stage, 'waiting');
+});
+
+test('the store says when it cannot be written', () => {
+  const { store } = tempStore();
+  assert.equal(store.probe(), null);
+  // A file where the directory should be: unwritable on every OS.
+  const blocked = createStore('/dev/null/settlements.json');
+  assert.equal(typeof blocked.probe(), 'string');
+  assert.ok(blocked.probe().length > 0);
 });
 
 test('an unreadable record is set aside, never overwritten', () => {

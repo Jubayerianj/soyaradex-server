@@ -29,11 +29,13 @@ const checks = {
   relayerGen: null,
   validatorMatches: null,
   paused: null,
+  storeError: null,
   checkedAt: null,
   error: null,
 };
 
 async function selfCheck() {
+  checks.storeError = store.probe();
   const r = (functionName, args = []) => publicClient.readContract({ address: cfg.executor, abi: AGENT_EXECUTOR_ABI, functionName, args });
   try {
     const [trusted, paused] = await Promise.all([r('genLayerValidator'), r('paused')]);
@@ -64,10 +66,12 @@ function warnings() {
   if (checks.validatorMatches === false) w.push('AgentExecutor trusts a different AgentValidator than VALIDATOR_ADDRESS');
   if (checks.paused) w.push('AgentExecutor is paused');
   if (!cfg.apiKey) w.push('SERVER_API_KEY is not set: the app cannot hand trades over');
+  if (checks.storeError) w.push(`STORE_PATH ${cfg.storePath} is not writable (${checks.storeError}): mount a volume there; on Railway, if it still fails, set RAILWAY_RUN_UID=0`);
   return w;
 }
 
 const canSettle = () => Boolean(walletClient) && checks.relayerAuthorised !== false && checks.paused !== true;
+const canHold = () => !checks.storeError;
 
 const keeper = createKeeper({
   store,
@@ -83,17 +87,27 @@ const server = createApi({
   keeper,
   apiKey: cfg.apiKey,
   readCommitment: reads.readCommitment,
+  // Always answers: a broken store is reported here, never a 500, or the
+  // deploy's healthcheck would fail without saying why.
   health: async () => {
-    const trades = store.list();
+    let trades = null;
+    try {
+      const all = store.list();
+      trades = { open: all.filter((e) => !TERMINAL_STAGES.has(e.stage)).length, total: all.length };
+    } catch (err) {
+      checks.storeError = checks.storeError || err?.message || String(err);
+    }
     return {
       ok: true,
       canSettle: canSettle(),
+      canHold: canHold(),
+      storePath: cfg.storePath,
       warnings: warnings(),
       executor: cfg.executor,
       validator: cfg.validator,
       ...checks,
       keeper: keeper.status(),
-      trades: { open: trades.filter((e) => !TERMINAL_STAGES.has(e.stage)).length, total: trades.length },
+      trades,
     };
   },
 });
